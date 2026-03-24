@@ -1,0 +1,1468 @@
+---
+title: "Northfield Township Post-Primary Review"
+author: "Drew Duffy"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(showtext)
+library(dplyr)
+
+results <- read_csv("northfield_results_tidy.csv")
+
+glimpse(results)
+```
+
+```{r}
+precincts <- st_read("Precinct.shp")
+
+glimpse(precincts)
+```
+
+```{r}
+northfield_precincts <- precincts |>
+  filter(Township_N == "NORTHFIELD")
+
+glimpse(northfield_precincts)
+```
+
+```{r}
+results |> 
+  filter(race == "US Senate") |> 
+  distinct(precinct, precinct_num) |> 
+  arrange(precinct_num)
+```
+
+```{r}
+results |> 
+  filter(race == "US Senate") |> 
+  distinct(precinct, precinct_num) |> 
+  arrange(precinct_num) |> 
+  print(n = 59)
+```
+
+```{r}
+results <- results |> 
+  filter(!is.na(precinct_num))
+```
+
+```{r}
+nrow(results |> distinct(precinct))
+```
+
+```{r}
+# prepare the join
+northfield_precincts <- northfield_precincts |> 
+  mutate(precinct_num = as.numeric(Precinct_N))
+
+# filter to just Stratton's results
+stratton <- results |> 
+  filter(race == "US Senate", candidate == "Juliana Stratton")
+
+# join
+map_data <- northfield_precincts |> 
+  left_join(stratton, by = "precinct_num")
+
+# map
+ggplot(map_data) +
+  geom_sf(aes(fill = vote_share)) +
+  scale_fill_gradient(low = "white", high = "#1F4E79",
+                      labels = scales::percent) +
+  labs(
+    title = "Juliana Stratton — US Senate",
+    subtitle = "Vote share by precinct, Northfield Township (2026 Dem Primary)",
+    fill = "Vote Share"
+  ) +
+  theme_void()
+```
+
+```{r}
+# filter to both candidates
+senate_compare <- results |> 
+  filter(race == "US Senate", 
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi"))
+
+# join to shapefile
+map_data_compare <- northfield_precincts |> 
+  left_join(senate_compare, by = "precinct_num")
+
+# map
+ggplot(map_data_compare) +
+  geom_sf(aes(fill = vote_share)) +
+  scale_fill_gradient(low = "white", high = "#1F4E79",
+                      labels = scales::percent) +
+  facet_wrap(~ candidate) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = "Vote share by precinct, Northfield Township (2026 Dem Primary)",
+    fill = "Vote Share"
+  ) +
+  theme_void()
+```
+
+```{r}
+# find winner per precinct
+senate_winner <- results |> 
+  filter(race == "US Senate") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1) |> 
+  ungroup()
+
+# join to shapefile
+map_data_winner <- northfield_precincts |> 
+  left_join(senate_winner, by = "precinct_num")
+
+# township-wide totals for subtitle
+township_totals <- results |> 
+  filter(race == "US Senate") |> 
+  group_by(candidate) |> 
+  summarise(total_votes = sum(votes)) |> 
+  arrange(desc(total_votes))
+
+# build subtitle string
+subtitle_text <- township_totals |> 
+  mutate(label = paste0(candidate, ": ", total_votes)) |> 
+  pull(label) |> 
+  paste(collapse = "  |  ")
+
+# map
+ggplot(map_data_winner) +
+  geom_sf(aes(fill = vote_share, color = candidate), linewidth = 1.2) +
+  scale_fill_gradient(low = "white", high = "#1F4E79",
+                      labels = scales::percent) +
+  scale_color_manual(values = c(
+    "Juliana Stratton"       = "#1F4E79",
+    "Raja Krishnamoorthi"    = "#C00000",
+    "Robin Kelly"            = "#375623",
+    "Kevin Ryan"             = "#FF8C00",
+    "Steve Botsford Jr."     = "#7B2D8B",
+    "Bryan Maxwell"          = "#008080",
+    "Jonathan Dean"          = "#8B4513",
+    "Sean Brown"             = "#2F4F4F",
+    "Awisi A. Bustos"        = "#B8860B",
+    "Christopher Swann"      = "#556B2F"
+  )) +
+  labs(
+    title = "US Senate — Winner by Precinct",
+    subtitle = subtitle_text,
+    fill = "Winner's Vote Share",
+    color = "Winner"
+  ) +
+  theme_void() +
+  theme(plot.subtitle = element_text(size = 7))
+```
+
+```{r}
+senate_winner |> 
+  count(candidate) |> 
+  arrange(desc(n))
+```
+
+```{r}
+# filter to just Stratton and Raja
+senate_two <- results |> 
+  filter(race == "US Senate", 
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi"))
+
+# find winner per precinct and calculate margin
+senate_winner_two <- senate_two |> 
+  group_by(precinct_num) |> 
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1) |> 
+  ungroup()
+
+# join to shapefile
+map_data_two <- northfield_precincts |> 
+  left_join(senate_winner_two, by = "precinct_num")
+
+# township totals for subtitle
+subtitle_text <- results |> 
+  filter(race == "US Senate",
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi")) |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  arrange(desc(total)) |> 
+  mutate(label = paste0(candidate, ": ", total)) |> 
+  pull(label) |> 
+  paste(collapse = "  |  ")
+
+# map
+ggplot(map_data_two) +
+  geom_sf(aes(fill = interaction(candidate, margin))) +
+  scale_fill_manual(
+    values = colorRampPalette(c("#aec6e8", "#1F4E79"))(30) |> 
+      c(colorRampPalette(c("#f4a9a8", "#C00000"))(30)),
+    guide = "none"
+  ) +
+  geom_sf(aes(color = candidate), fill = NA, linewidth = 0.3) +
+  scale_color_manual(
+    values = c("Juliana Stratton" = "#1F4E79", 
+               "Raja Krishnamoorthi" = "#C00000")
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    color = "Winner"
+  ) +
+  theme_void()
+```
+
+```{r}
+# township totals for subtitle - pct this time
+subtitle_text <- results |> 
+  filter(race == "US Senate",
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi")) |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |>
+  arrange(desc(total)) |> 
+  mutate(label = paste0(candidate, ": ", pct)) |> 
+  pull(label) |> 
+  paste(collapse = "  |  ")
+
+subtitle_text
+```
+
+```{r}
+# filter to just Stratton and Raja
+senate_two <- results |> 
+  filter(race == "US Senate", 
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi"))
+
+# find winner per precinct and calculate margin
+senate_winner_two <- senate_two |> 
+  group_by(precinct_num) |> 
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1) |> 
+  ungroup()
+
+# join to shapefile
+map_data_two <- northfield_precincts |> 
+  left_join(senate_winner_two, by = "precinct_num")
+
+# township totals as pct for subtitle
+subtitle_text <- results |> 
+  filter(race == "US Senate",
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi")) |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |>
+  arrange(desc(total)) |> 
+  mutate(label = paste0(candidate, ": ", pct)) |> 
+  pull(label) |> 
+  paste(collapse = "  |  ")
+
+# map
+ggplot(map_data_two) +
+  geom_sf(aes(fill = interaction(candidate, margin))) +
+  scale_fill_manual(
+    values = colorRampPalette(c("#aec6e8", "#1F4E79"))(30) |> 
+      c(colorRampPalette(c("#f4a9a8", "#C00000"))(30)),
+    guide = "none"
+  ) +
+  geom_sf(aes(color = candidate), fill = NA, linewidth = 0.3) +
+  scale_color_manual(
+    values = c("Juliana Stratton" = "#1F4E79", 
+               "Raja Krishnamoorthi" = "#C00000")
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    color = "Winner"
+  ) +
+  theme_void()
+```
+
+```{r}
+library(showtext)
+font_add_google("Roboto", "roboto")
+showtext_auto()
+
+# map
+ggplot(map_data_two) +
+  geom_sf(aes(fill = interaction(candidate, margin))) +
+  scale_fill_manual(
+    values = colorRampPalette(c("#c8a8e8", "#6B2D8B"))(30) |> 
+      c(colorRampPalette(c("#a8e8b8", "#1A6B3C"))(30)),
+    guide = "none"
+  ) +
+  geom_sf(aes(color = candidate), fill = NA, linewidth = 0.3) +
+  scale_color_manual(
+    values = c("Juliana Stratton" = "#6B2D8B", 
+               "Raja Krishnamoorthi" = "#1A6B3C")
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    color = "Winner"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.title = element_text(color = "white", family = "roboto", 
+                              size = 16, face = "bold"),
+    plot.subtitle = element_text(color = "grey70", family = "roboto", size = 10),
+    legend.background = element_rect(fill = "black", color = NA),
+    legend.text = element_text(color = "white", family = "roboto"),
+    legend.title = element_text(color = "white", family = "roboto")
+  )
+```
+
+```{r}
+# create a continuous diverging score: positive = Stratton, negative = Raja
+map_data_two <- map_data_two |> 
+  mutate(margin_dir = ifelse(candidate == "Juliana Stratton", margin, -margin))
+
+ggplot(map_data_two) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  scale_fill_gradient2(
+    low = "#1A6B3C",
+    mid = "grey20",
+    high = "#6B2D8B",
+    midpoint = 0,
+    labels = scales::percent,
+    name = "Margin"
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "black", color = NA),
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.title = element_text(color = "white", family = "roboto",
+                              size = 16, face = "bold"),
+    plot.subtitle = element_text(color = "grey70", family = "roboto", size = 10),
+    legend.background = element_rect(fill = "black", color = NA),
+    legend.text = element_text(color = "white", family = "roboto"),
+    legend.title = element_text(color = "white", family = "roboto")
+  )
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+```
+
+```{r}
+subtitle_text <- "Raja Krishnamoorthi: 44.8%  |  Juliana Stratton: 40.0%  |  Others: 15.2%"
+
+```
+
+```{r}
+ggplot(map_data_two) +
+  geom_sf(aes(fill = margin_dir), color = "grey70", linewidth = 0.2) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "grey85",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = "Juliana Stratton\n\n\n\n\n\nRaja Krishnamoorthi",
+    breaks = NULL
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(color = "grey40", family = "garamond", 
+                                 size = 10, hjust = 0.5),
+    plot.caption = element_text(color = "grey50", family = "garamond", 
+                                size = 8, hjust = 0.2),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond"),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+```
+
+```{r}
+geom_sf_text(aes(label = precinct_num), color = "black", 
+             family = "garamond", size = 2.5)
+```
+
+```{r}
+ggplot(map_data_two) +
+  geom_sf(aes(fill = margin_dir), color = "grey70", linewidth = 0.2) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "grey85",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = NULL,
+    breaks = c(max(map_data_two$margin_dir, na.rm = TRUE), 
+               0, 
+               min(map_data_two$margin_dir, na.rm = TRUE)),
+    labels = c("Juliana Stratton", "0%", "Raja Krishnamoorthi"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "grey40", family = "garamond",
+                                 size = 10, hjust = 0),
+    plot.caption = element_text(color = "grey50", family = "garamond",
+                                size = 8, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("senate_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "US Senate") |> 
+  distinct(precinct, precinct_num) |> 
+  filter(is.na(precinct_num))
+```
+
+```{r}
+results |> 
+  filter(race == "US Senate") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1) |> 
+  ungroup() |> 
+  distinct(precinct, precinct_num) |> 
+  arrange(precinct_num) |> 
+  print(n = 60)
+```
+
+```{r}
+results |> 
+  filter(race == "US Senate") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  count(candidate) |> 
+  arrange(desc(n))
+```
+
+```{r}
+# get vote share out of all votes cast for all candidates
+senate_all <- results |> 
+  filter(race == "US Senate") |> 
+  group_by(precinct_num) |> 
+  mutate(total_votes = sum(votes)) |> 
+  ungroup() |> 
+  filter(candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi")) |> 
+  mutate(vote_share_all = votes / total_votes)
+
+# winner per precinct
+senate_winner_two <- senate_all |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Juliana Stratton", 
+                             vote_share_all, -vote_share_all)) |> 
+  ungroup()
+
+# join to shapefile
+map_data_two <- northfield_precincts |> 
+  left_join(senate_winner_two, by = "precinct_num")
+```
+
+```{r}
+subtitle_text <- "Raja Krishnamoorthi: 44.8%  |  Juliana Stratton: 40.0%  |  Others: 15.2%"
+
+ggplot(map_data_two) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "white",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = NULL,
+    breaks = c(max(map_data_two$margin_dir, na.rm = TRUE),
+               0,
+               min(map_data_two$margin_dir, na.rm = TRUE)),
+    labels = c("Juliana Stratton", "0%", "Raja Krishnamoorthi"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "US Senate — Stratton vs. Krishnamoorthi",
+    subtitle = subtitle_text,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "grey40", family = "garamond",
+                                 size = 10, hjust = 0),
+    plot.caption = element_text(color = "grey50", family = "garamond",
+                                size = 8, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("senate_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+senate_two <- results |> 
+  filter(race == "US Senate", 
+         candidate %in% c("Juliana Stratton", "Raja Krishnamoorthi"))
+
+senate_winner_two <- senate_two |> 
+  group_by(precinct_num) |> 
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Juliana Stratton", margin, -margin)) |> 
+  ungroup()
+
+map_data_two <- northfield_precincts |> 
+  left_join(senate_winner_two, by = "precinct_num")
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+subtitle_text <- "Raja Krishnamoorthi: 44.8%  |  Juliana Stratton: 40.0%  |  Others: 15.2%"
+
+ggplot(map_data_two) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "grey85",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_data_two$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_data_two$margin_dir, na.rm = TRUE)),
+    labels = c("Stratton", "+15%", "Even", "-15%", "Krishnamoorthi"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "2026 Democratic Primary — United States Senator",
+    subtitle = subtitle_text,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, hjust = 2.1),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = -1),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond",
+                                size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("senate_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "9th Congressional District") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  count(candidate) |> 
+  arrange(desc(n))
+```
+
+```{r}
+results |> 
+  filter(race == "9th Congressional District") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total)) |> 
+  print(n = 20)
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+cong_four <- results |> 
+  filter(race == "9th Congressional District",
+         candidate %in% c("Laura Fine", "Daniel Biss", 
+                          "Phil Andrew", "Kat Abughazaleh"))
+
+cong_winner <- results |> 
+  filter(race == "9th Congressional District") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  select(precinct_num, winner = candidate)
+
+map_cong <- northfield_precincts |> 
+  inner_join(cong_four, by = "precinct_num") |> 
+  left_join(cong_winner, by = "precinct_num") |> 
+  mutate(won_precinct = candidate == winner)
+
+map_cong_won <- map_cong |> filter(won_precinct == TRUE)
+
+subtitle_text_cong <- "Laura Fine: 42.8%  |  Daniel Biss: 26.7%  |  Kat Abughazaleh: 11.7%  |  Phil Andrew: 11.5%  |  Others: 7.3%"
+
+ggplot(map_cong) +
+  geom_sf(aes(fill = vote_share), color = "grey70", linewidth = 0.3) +
+  geom_sf(data = map_cong_won, aes(fill = vote_share), 
+          color = "gold", linewidth = 0.5) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+ scale_fill_gradient(
+    low = "grey90",
+    high = "#08306B",
+    labels = scales::percent,
+    name = "Vote Share"
+  ) +
+  facet_wrap(~ candidate, ncol = 2) +
+  labs(
+    title = "9th Congressional District Democratic Primary",
+    subtitle = subtitle_text_cong,
+    caption = "Orange outline = precinct winner  |  Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+   plot.title = element_text(color = "black", family = "garamond",
+                          size = 16, face = "bold",
+                          margin = margin(l = -30)),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, lineheight = 0.2, margin = margin(l = -30)),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust =  0),
+    strip.text = element_text(color = "black", family = "garamond",
+                              size = 11, face = "bold"),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+```
+
+```{r}
+results |> 
+  filter(race == "Cook County Assessor") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+assessor_two <- results |> 
+  filter(race == "Cook County Assessor",
+         candidate %in% c("Fritz Kaegi", "Pat Hynes"))
+
+assessor_winner <- assessor_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Fritz Kaegi", margin, -margin)) |> 
+  ungroup()
+
+map_assessor <- northfield_precincts |> 
+  left_join(assessor_winner, by = "precinct_num")
+
+subtitle_text_assessor <- "Fritz Kaegi: 56.0%  |  Pat Hynes: 44.0%"
+
+ggplot(map_assessor) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "grey85",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_assessor$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_assessor$margin_dir, na.rm = TRUE)),
+    labels = c("Kaegi", "+15%", "Even", "-15%", "Hynes"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "Cook County Assessor Democratic Primary — Northfield Township",
+    subtitle = subtitle_text_assessor,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, hjust = 0),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("assessor_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "Cook County Board of Review") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+review_two <- results |> 
+  filter(race == "Cook County Board of Review",
+         candidate %in% c("Elizabeth \"Liz\" Nicholson", "Samantha Steele"))
+
+review_winner <- review_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Elizabeth \"Liz\" Nicholson", margin, -margin)) |> 
+  ungroup()
+
+map_review <- northfield_precincts |> 
+  left_join(review_winner, by = "precinct_num")
+
+subtitle_text_review <- "Elizabeth Nicholson: 57.9%  |  Samantha Steele: 42.1%  |  No endorsement"
+
+ggplot(map_review) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#008080",
+    mid = "grey85",
+    high = "#FF6B00",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_review$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_review$margin_dir, na.rm = TRUE)),
+    labels = c("Nicholson", "+15%", "Even", "-15%", "Steele"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "Cook County Board of Review Democratic Primary — Northfield Township",
+    subtitle = subtitle_text_review,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, hjust = 2.1),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = -1),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("board_of_review_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "9th State Senate District") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+senate9_two <- results |> 
+  filter(race == "9th State Senate District",
+         candidate %in% c("Patrick Hanley", "Rachel Ruttenberg"))
+
+senate9_winner <- senate9_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Patrick Hanley", margin, -margin)) |> 
+  ungroup()
+
+map_senate9 <- northfield_precincts |> 
+  inner_join(senate9_winner, by = "precinct_num")
+
+subtitle_text_senate9 <- "Patrick Hanley: 50.1%  |  Rachel Ruttenberg: 49.9%  |  No endorsement"
+
+ggplot(map_senate9) +
+  geom_sf(aes(fill = margin_dir), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#4393C3",
+    mid = "grey85",
+    high = "#A50026",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_senate9$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_senate9$margin_dir, na.rm = TRUE)),
+    labels = c("Hanley", "+15%", "Even", "-15%", "Ruttenberg"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "9th State Senate District Democratic Primary — Northfield Township",
+    subtitle = subtitle_text_senate9,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 16, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, hjust = 0),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("senate9_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+library(tigris)
+options(tigris_use_cache = TRUE)
+
+roads <- roads("IL", "Cook", progress_bar = FALSE)
+places <- places("IL", progress_bar = FALSE)
+```
+
+```{r}
+roads <- st_transform(roads, st_crs(northfield_precincts))
+places <- st_transform(places, st_crs(northfield_precincts))
+```
+
+```{r}
+nf_boundary <- st_union(northfield_precincts)
+roads_nf <- st_intersection(roads, nf_boundary)
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.2) +
+  geom_sf(data = northfield_precincts, fill = NA, color = "black", linewidth = 0.3) +
+  theme_void()
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+senate9_two <- results |> 
+  filter(race == "9th State Senate District",
+         candidate %in% c("Patrick Hanley", "Rachel Ruttenberg"))
+
+senate9_winner <- senate9_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Patrick Hanley", margin, -margin)) |> 
+  ungroup()
+
+map_senate9 <- northfield_precincts |> 
+  inner_join(senate9_winner, by = "precinct_num")
+
+subtitle_text_senate9 <- "*Patrick Hanley: 50.1%  |  *Rachel Ruttenberg: 49.9%"
+
+ggplot() +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(data = map_senate9, aes(fill = margin_dir), 
+          color = "black", linewidth = 0.2, alpha = 0.85) +
+  geom_sf_text(data = map_senate9, aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#4393C3",
+    mid = "grey85",
+    high = "#A50026",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_senate9$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_senate9$margin_dir, na.rm = TRUE)),
+    labels = c("Hanley", "+15%", "Even", "-15%", "Ruttenberg"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "9th State Senate District",
+    subtitle = subtitle_text_senate9,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 12, hjust = 0),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 10, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15))
+```
+
+```{r}
+results |> 
+  filter(race == "Comptroller") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+comptroller_two <- results |> 
+  filter(race == "Comptroller",
+         candidate %in% c("Holly Kim", "Margaret Croke"))
+
+comptroller_winner <- comptroller_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Holly Kim", margin, -margin)) |> 
+  ungroup()
+
+map_comptroller <- northfield_precincts |> 
+  left_join(comptroller_winner, by = "precinct_num")
+
+subtitle_text_comptroller <- "Margaret Croke: 40.3%  |  *Holly Kim: 39.8%\nKarina Villa: 15.0%  |  Stephanie Kifowit: 4.9%"
+
+ggplot() +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(data = map_comptroller, aes(fill = margin_dir),
+          color = "black", linewidth = 0.2, alpha = 0.85) +
+  geom_sf_text(data = map_comptroller, aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#283593",
+    mid = "grey85",
+    high = "#FF8F00",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(max(map_comptroller$margin_dir, na.rm = TRUE),
+               0.15,
+               0,
+               -0.15,
+               min(map_comptroller$margin_dir, na.rm = TRUE)),
+    labels = c("Kim", "+15%", "Even", "-15%", "Croke"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  labs(
+    title = "Comptroller",
+    subtitle = subtitle_text_comptroller,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 12, hjust = 0, lineheight = 1.2),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 10, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("comptroller_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "Comptroller") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  count(candidate) |> 
+  arrange(desc(n))
+```
+
+```{r}
+results |> 
+  filter(race == "Committeeperson Dem State Central 9th") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+results |> 
+  filter(race == "Committeeperson Dem State Central 9th") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+comm9_all <- results |> 
+  filter(race == "Committeeperson Dem State Central 9th")
+
+map_comm9 <- northfield_precincts |> 
+  inner_join(comm9_all, by = "precinct_num") |> 
+  mutate(candidate = factor(candidate, levels = c(
+    "Laura Fine", "Daniel Biss", "Josina Morita",
+    "George D. Alpogianis", "Leni Manaa-Hoppenworth", "Eric Smith"
+  )))
+
+subtitle_text_comm9 <- "*Laura Fine: 44.2%  |  *Daniel Biss: 35.9%  |  Josina Morita: 9.1%  |  George Alpogianis: 3.8%  |  Leni Manaa-Hoppenworth: 3.7%  |  Eric Smith: 3.4%"
+
+ggplot(map_comm9) +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(aes(fill = vote_share), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2) +
+  scale_fill_gradient(
+    low = "grey90", high = "midnightblue",
+    labels = scales::percent,
+    name = "Vote Share"
+  ) +
+  facet_wrap(~ candidate, ncol = 3) +
+  labs(
+    title = "Dem State Central Committeeperson — 9th District",
+    subtitle = subtitle_text_comm9,
+    caption = "* = endorsed  |  Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 8, hjust = 0, lineheight = 1.3),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = 0),
+    strip.text = element_text(color = "black", family = "garamond",
+                              size = 10, face = "bold"),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("committeeperson9_map.png", width = 8.5, height = 10, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "Committeeperson Dem State Central 10th") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+results <- results |> 
+  filter(!(race == "Committeeperson Dem State Central 10th" & precinct_num == 20))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+comm10_all <- results |> 
+  filter(race == "Committeeperson Dem State Central 10th")
+
+map_comm10 <- northfield_precincts |> 
+  inner_join(comm10_all, by = "precinct_num") |> 
+  mutate(candidate = factor(candidate, levels = c(
+    "Tracy Katz Muhl", "Thomas Maillard", "Mary Edly-Allen", "Jennifer Banek"
+  )))
+
+subtitle_text_comm10 <- "*Tracy Katz Muhl: 45.3%  |  *Thomas Maillard: 29.8%  |  Mary Edly-Allen: 12.9%  |  Jennifer Banek: 12.0%"
+
+ggplot(map_comm10) +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(aes(fill = vote_share), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2) +
+  scale_fill_gradient(
+    low = "grey90", high = "midnightblue",
+    labels = scales::percent,
+    name = "Vote Share"
+  ) +
+  facet_wrap(~ candidate, ncol = 2) +
+  labs(
+    title = "State Central Committeeperson — 10th District",
+    subtitle = subtitle_text_comm10,
+    caption = "* = endorsed  |  Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 8, hjust = 0, lineheight = 1.3),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = 0),
+    strip.text = element_text(color = "black", family = "garamond",
+                              size = 10, face = "bold"),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("committeeperson10_map.png", width = 8.5, height = 10, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "Committeeperson Dem State Central 10th") |> 
+  distinct(precinct_num) |> 
+  arrange(precinct_num)
+```
+
+```{r}
+results |> 
+  filter(race == "Cook County Board President") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+preckwinkle <- results |> 
+  filter(race == "Cook County Board President",
+         candidate == "Toni Preckwinkle")
+
+map_boardpres <- northfield_precincts |> 
+  left_join(preckwinkle, by = "precinct_num")
+
+subtitle_text_boardpres <- "*Toni Preckwinkle: 59.6%  |  Brendan Reilly: 40.4%"
+
+ggplot() +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(data = map_boardpres, aes(fill = vote_share),
+          color = "black", linewidth = 0.2, alpha = 0.85) +
+  geom_sf_text(data = map_boardpres, aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient(
+    low = "grey90", high = "#9B30FF",
+    labels = scales::percent,
+    name = "Preckwinkle\nVote Share"
+  ) +
+  labs(
+    title = "Cook County Board President",
+    subtitle = subtitle_text_boardpres,
+    caption = "Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 12, hjust = 0),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 10, hjust = 0),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("board_president_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race == "Cook County Board President") |> 
+  group_by(precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  count(candidate) |> 
+  arrange(desc(n))
+```
+
+```{r}
+results |> 
+  filter(race == "MWRD") |> 
+  group_by(candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep
+mwrd_all <- results |> 
+  filter(race == "MWRD")
+
+map_mwrd <- northfield_precincts |> 
+  inner_join(mwrd_all, by = "precinct_num") |> 
+  mutate(candidate = factor(candidate, levels = c(
+    "Beth McElroy Kirkwood", "Eira Lizeth Corral Sepúlveda", 
+    "Precious Brady-Davis", "Sarah Bury"
+  )))
+
+subtitle_text_mwrd <- "*Beth McElroy Kirkwood: 29.9%  |  *Eira Lizeth Corral Sepúlveda: 28.6%  |  *Precious Brady-Davis: 26.7%  |  Sarah Bury: 14.8%"
+
+ggplot(map_mwrd) +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(aes(fill = vote_share), color = "black", linewidth = 0.2) +
+  geom_sf_text(aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2) +
+  scale_fill_gradient(
+    low = "grey90", high = "midnightblue",
+    labels = scales::percent,
+    name = "Vote Share"
+  ) +
+  facet_wrap(~ candidate, ncol = 2) +
+  labs(
+    title = "Metropolitan Water Reclamation District",
+    subtitle = subtitle_text_mwrd,
+    caption = "* = endorsed  |  Voters select up to 3  |  Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 8, hjust = 0, lineheight = 1.3),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 8, hjust = 0),
+    strip.text = element_text(color = "black", family = "garamond",
+                              size = 10, face = "bold"),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("mwrd_map.png", width = 8.5, height = 10, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race %in% c("Circuit Court Judge (Cobbs)", "Circuit Court Judge (Coghlan)")) |> 
+  group_by(race, candidate) |> 
+  summarise(total = sum(votes)) |> 
+  mutate(pct = scales::percent(total / sum(total), accuracy = 0.1)) |> 
+  arrange(race, desc(total))
+```
+
+```{r}
+font_add_google("EB Garamond", "garamond")
+showtext_auto()
+
+# data prep - Cobbs
+cobbs_two <- results |> 
+  filter(race == "Circuit Court Judge (Cobbs)")
+
+cobbs_winner <- cobbs_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Luz Maria Toledo", margin, -margin)) |> 
+  ungroup() |> 
+  mutate(race_label = "Cobbs Vacancy\nLuz Maria Toledo vs. Linda Sackey")
+
+# data prep - Coghlan
+coghlan_two <- results |> 
+  filter(race == "Circuit Court Judge (Coghlan)")
+
+coghlan_winner <- coghlan_two |> 
+  group_by(precinct_num) |>
+  mutate(margin = vote_share - min(vote_share)) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  mutate(margin_dir = ifelse(candidate == "Michael Cabonargi", margin, -margin)) |> 
+  ungroup() |> 
+  mutate(race_label = "Coghlan Vacancy\nMichael Cabonargi vs. Ashonta C. Rice")
+
+# combine
+circuit_combined <- bind_rows(cobbs_winner, coghlan_winner)
+
+map_circuit <- northfield_precincts |> 
+  left_join(circuit_combined, by = "precinct_num")
+
+subtitle_text_circuit <- "Cobbs: *Toledo 65.5% | Sackey 34.5%\nCoghlan: *Cabonargi 63.7% | Rice 36.3%"
+
+ggplot() +
+  geom_sf(data = roads_nf, color = "grey60", linewidth = 0.15) +
+  geom_sf(data = map_circuit, aes(fill = margin_dir),
+          color = "black", linewidth = 0.2, alpha = 0.85) +
+  geom_sf_text(data = map_circuit, aes(label = precinct_num), color = "black",
+               family = "garamond", size = 2.5) +
+  scale_fill_gradient2(
+    low = "#00C957",
+    mid = "grey85",
+    high = "#9B30FF",
+    midpoint = 0,
+    name = "Head-to-Head Margin",
+    breaks = c(0.40, 0.15, 0, -0.15, -0.40),
+    labels = c("Toledo/Cabonargi", "+15%", "Even", "-15%", "Sackey/Rice"),
+    guide = guide_colorbar(
+      barheight = unit(6, "cm"),
+      barwidth = unit(0.4, "cm"),
+      ticks = FALSE
+    )
+  ) +
+  facet_wrap(~ race_label, ncol = 2) +
+  labs(
+    title = "Circuit Court Judge — Cook County",
+    subtitle = subtitle_text_circuit,
+    caption = "* = endorsed  |  Source: Cook County Clerk  |  Graphic by Drew Duffy"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(color = "black", family = "garamond",
+                              size = 18, face = "bold", hjust = 0,
+                              margin = margin(b = 5)),
+    plot.subtitle = element_text(color = "black", family = "garamond",
+                                 size = 10, hjust = 0, lineheight = 1.4,
+                                 margin = margin(b = 5)),
+    plot.caption = element_text(color = "black", family = "garamond",
+                                size = 10, hjust = 0,
+                                margin = margin(t = 5)),
+    strip.text = element_text(color = "black", family = "garamond",
+                              size = 10, face = "plain",
+                              margin = margin(t = 5, b = 5)),
+    panel.spacing = unit(1.5, "cm"),
+    legend.text = element_text(color = "black", family = "garamond"),
+    legend.title = element_text(color = "black", family = "garamond", size = 9),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+ggsave("circuit_court_map.png", width = 8.5, height = 7, dpi = 300)
+```
+
+```{r}
+results |> 
+  filter(race %in% c("Circuit Court Judge (Cobbs)", "Circuit Court Judge (Coghlan)")) |> 
+  group_by(race) |> 
+  group_by(race, precinct_num) |> 
+  slice_max(votes, n = 1, with_ties = FALSE) |> 
+  ungroup() |> 
+  count(race, candidate) |> 
+  arrange(race, desc(n))
+```
